@@ -1,0 +1,8 @@
+[package]
+name = "rusiler"
+version = "0.1.0"
+authors = ["marony <marony@binbo-kodakusan.com>"]
+
+[dependencies]
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.5", features = ["winuser","commdlg"] }
