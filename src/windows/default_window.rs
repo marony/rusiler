@@ -1,11 +1,13 @@
 /// DefaultWindow構造体
 
-use windows::window::Window;
+use windows::window::{Window, WindowFactory};
 
 use std::mem::{zeroed};
 use winapi::shared::windef::{HWND};
 use winapi::um::winuser::{BeginPaint};
 use winapi::um::wingdi::{TextOutA};
+
+use std::rc::{Rc};
 
 static SZ_TEXT: &'static [u8] = b"Hello, world!";
 
@@ -45,5 +47,19 @@ impl Window for DefaultWindow {
                      SZ_TEXT.len() as i32
             );
         }
+    }
+}
+
+pub struct DefaultWindowFactory {}
+
+impl DefaultWindowFactory {
+    pub fn new () -> DefaultWindowFactory {
+        DefaultWindowFactory {}
+    }
+}
+
+impl WindowFactory for DefaultWindowFactory {
+    fn create_window_object(&self, hwnd: HWND) -> Rc<Window> {
+        Rc::new(DefaultWindow::new(hwnd))
     }
 }

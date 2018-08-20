@@ -1,7 +1,5 @@
 /// Windowトレイトと関連ユーティリティ
 
-use windows::default_window::DefaultWindow;
-
 use std::mem::{size_of, zeroed, transmute};
 use winapi::shared::minwindef::{HINSTANCE, ATOM, UINT, WPARAM, LPARAM, LRESULT, LPVOID};
 use winapi::shared::ntdef::{LONG, LPCSTR, LPCWSTR};
@@ -21,7 +19,7 @@ static SZ_TITLE: &'static [u8] = b"t\0i\0t\0l\0e\0\0\0";
 
 /// Windowトレイト
 pub trait Window {
-    /// WM_CREATE
+    /// WM_CREATEではない
     fn on_create(&self) -> () {
         println!("on_create:");
     }
@@ -35,11 +33,16 @@ pub trait Window {
     }
 }
 
+pub trait WindowFactory {
+    fn create_window_object(&self, hwnd: HWND) -> Rc<Window>;
+}
+
 /// WinMainより呼ばれる
-pub fn win_main(h_instance: HINSTANCE,
+pub fn win_main<T: WindowFactory>(h_instance: HINSTANCE,
                 _h_prev_instance: HINSTANCE,
                 _cmd_line: LPCSTR,
-                cmd_show: c_int) -> c_int {
+                cmd_show: c_int,
+                factory: T) -> c_int {
     unsafe {
         match register_window_class(h_instance) {
             0 => {
@@ -51,8 +54,8 @@ pub fn win_main(h_instance: HINSTANCE,
                 );
             },
             _atom => {
-                let window = create_window(h_instance);
-                if window.is_null() {
+                let hwnd = create_window(h_instance);
+                if hwnd.is_null() {
                     MessageBoxA(
                         0 as HWND,
                         b"Call to CreateWindow failed!\0".as_ptr() as *const i8,
@@ -60,7 +63,16 @@ pub fn win_main(h_instance: HINSTANCE,
                         0 as UINT
                     );
                 } else {
-                    init_window(window, cmd_show);
+                    init_window(hwnd, cmd_show);
+                    {
+                        // ウインドウ属性にWindowオブジェクトを設定する
+                        let window = factory.create_window_object(hwnd);
+                        {
+                            // WM_CREATE発生後なのでここで呼ぶ
+                            window.on_create();
+                        }
+                        set_window(hwnd, window);
+                    }
                     event_loop();
                 };
             }
@@ -118,9 +130,9 @@ fn create_window(h_instance: HINSTANCE) -> HWND {
 }
 
 /// ウインドウを初期化する
-fn init_window(window: HWND, cmd_show: c_int) -> () {
+fn init_window(hwnd: HWND, cmd_show: c_int) -> () {
     unsafe {
-        ShowWindow(window, cmd_show);
+        ShowWindow(hwnd, cmd_show);
     }
 }
 
@@ -143,12 +155,7 @@ fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
 //            // lpCreateParamsにCreateWindowExのlpParamが入っている
 //            let cs = lparam as *const CREATESTRUCTW;
 //            let p = (*cs).lpCreateParams as i32;
-            // Windowオブジェクトを設定する
-            let window: Rc<Window> = Rc::new(DefaultWindow::new(hwnd));
-            {
-                window.on_create();
-            }
-            set_window(hwnd, window);
+            // NOTE: まだウインドウ属性が入っていないのでWindow.on_createは呼び出せない
             0
         },
         WM_DESTROY => {
@@ -157,7 +164,7 @@ fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
                 window.on_destroy();
             }
             PostQuitMessage(0);
-            // into_rawを呼ばないことでオブジェクトを破棄する
+            // NOTE: release_windowを呼ばないことでオブジェクトを破棄する
             0
         },
         WM_PAINT => {
@@ -165,8 +172,7 @@ fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
             {
                 window.paint();
             }
-            // Rc::into_rawを呼ぶことで、オブジェクトが解放されないようにする
-            Rc::into_raw(window);
+            release_window(window);
             0
         },
         _ => {
@@ -220,4 +226,14 @@ fn get_window(hwnd: HWND) -> Rc<Window> {
             (((p4 as u128) & 0xffffffff) << 0);
         Rc::from_raw(transmute::<u128, *const Window>(p))
     }
+}
+
+/// ウインドウをRcの管理下から外す(メモリを解放しない)
+///
+/// # Arguments
+///
+/// * window - Windowオブジェクト
+///
+fn release_window(window: Rc<Window>) -> () {
+    Rc::into_raw(window);
 }
